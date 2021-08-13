@@ -1,0 +1,15 @@
+train_path: dataset/commongen.train.jsonl
+dev_path: dataset/commongen.dev.jsonl
+test_path: dataset/commongen.test.jsonl
+batch_size: 16
+gradient_accumulation_steps: 12
+learning_rate: 5e-5
+checkpoint_every_step: 500
+max_epoch: 20
+use_pointer: False
+use_mention_flag: True
+copy_vocab_path: dataset/new_copy_vocab.txt
+lm_type: t5-large
+freeze_param: True
+use_orginal_enc_pos_embs: True
+freeze_enc_pos_param: False
