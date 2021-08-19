@@ -4,7 +4,11 @@ Source Code For ACL 2021 Paper "Mention Flags (MF): Constraining Transformer-bas
 ## Data Download
 Please download the evaluation code from [here](https://drive.google.com/drive/folders/10pZHQwNxzTPALzDXqNZokSQOJJtRjB5p?usp=sharing) and put it into the dataset/ folder.
 
-The pre-trained models are available in [here](https://drive.google.com/drive/folders/1pOY_G4ygQ8C76mgGlchyc7jbEtwoY_r9?usp=sharing). Please download each of them and put them into the dataset/ folder.
+The pre-trained models are available in [here](https://drive.google.com/drive/folders/1pOY_G4ygQ8C76mgGlchyc7jbEtwoY_r9?usp=sharing). Please download each file and put them into the dataset/ folder.
+
+The training, dev and test data for Commonsense Generation and E2E task are available in [here](https://drive.google.com/drive/folders/1i_rua8e3Pl230K9vy3su_wkSZrGykrT2?usp=sharing). Please download each file and put them into the dataset/ folder.
+
+The training, dev and test data for is coming soon.
 
 ## Dependency
 Before running the code, please install following dependencies:
