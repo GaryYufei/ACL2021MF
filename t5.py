@@ -2,7 +2,6 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 import torch.nn as nn
 import torch
 import numpy as np
-from ObjCopy import OC
 import copy
 from transformers.modeling_t5 import *
 from transformers.file_utils import ModelOutput
@@ -821,7 +820,7 @@ class T5Stack(T5PreTrainedModel):
         )
 
 
-class T5WithCopy(T5PreTrainedModel):
+class T5WithMF(T5PreTrainedModel):
     authorized_missing_keys = [r"encoder\.embed_tokens\.weight", r"decoder\.embed_tokens\.weight", r"lm_head\.weight", r"mention_flag", r"visual_head", r"visual_encoder"]
 
     def __init__(self, config, **model_args):
@@ -849,10 +848,6 @@ class T5WithCopy(T5PreTrainedModel):
         self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
 
         self.init_weights()
-
-    def set_oc(self, oc):
-        assert self.local_config.use_pointer
-        self.oc = oc
 
     def set_fg2cls(self, fg2cls):
         assert self.local_config.use_pointer
@@ -1081,16 +1076,7 @@ class T5WithCopy(T5PreTrainedModel):
 
 
             if self.local_config.use_mention_flag:
-                if self.local_config.use_pointer:
-                    cur_decoder_mention_flag = decoder_mention_flag[:, 0].clone()
-                    roi_selected = decoder_history_input_ids - self.config.vocab_size
-                    roi_mask = roi_selected < 0
-                    roi_selected[roi_mask] = 0
-                    selected_class = self.fg2cls[roi_selected]
-                    selected_class[roi_mask] = 0
-                    update_obj_mask = torch.sum(decoder_cls_on_input.unsqueeze(1) == selected_class.unsqueeze(-1), dim=1) > 0
-                    cur_decoder_mention_flag[update_obj_mask & (cur_decoder_mention_flag == 1)] = 2
-                elif not self.local_config.static_mf:
+                if not self.local_config.static_mf:
                     for i in range(B):
                         available_cls = set()
                         for cls_index, mf in zip(d_cls[i], d_mf[i]):
@@ -1142,34 +1128,6 @@ class T5WithCopy(T5PreTrainedModel):
         # See https://github.com/tensorflow/mesh/blob/fa19d69eafc9a482aff0b59ddd96b025c0cb207d/mesh_tensorflow/transformer/transformer.py#L586
         sequence_output = sequence_output * (self.model_dim ** -0.5)
         lm_logits = self.lm_head(sequence_output)
-
-        if self.local_config.use_pointer:
-            copy_memory = decoder_copy_pos.unsqueeze(-1) * hidden_states.unsqueeze(1)
-            copy_pos_count = torch.sum(decoder_copy_pos, dim=2, keepdim=True)
-            copy_pos_count[copy_pos_count == 0] = 1.0
-            copy_candidates = torch.sum(copy_memory, dim=2) / copy_pos_count
-            copy_mask = decoder_concept_cls > 0
-            
-            prob_list = []   
-            if self.training:
-                seq_len = sequence_output.size(1)
-                for i in range(seq_len):
-                    cur_mention_flag = decoder_copy_mention_flag[:, i]
-                    prob = self.oc(copy_candidates, copy_mask, decoder_concept_cls, sequence_output[:, i], lm_logits[:, i], cur_mention_flag)
-                    prob_list.append(prob.unsqueeze(1))
-            else:
-                cur_mention_flag = decoder_copy_mention_flag[:, 0]
-                roi_selected = decoder_history_input_ids - self.config.vocab_size
-                roi_mask = roi_selected < 0
-                roi_selected[roi_mask] = 0
-                selected_class = self.fg2cls[roi_selected]
-                selected_class[roi_mask] = 0
-                update_obj_mask = torch.sum(decoder_concept_cls.unsqueeze(1) == selected_class.unsqueeze(-1), dim=1) > 0
-                cur_mention_flag[update_obj_mask & (cur_mention_flag == 1)] = 2
-                prob = self.oc(copy_candidates, copy_mask, decoder_concept_cls, sequence_output[:, 0], lm_logits[:, 0], cur_mention_flag)
-                prob_list.append(prob.unsqueeze(1))
-
-            lm_logits = torch.cat(prob_list, dim=1)
 
         loss = None
         if labels is not None:
@@ -1691,34 +1649,11 @@ def get_lm_representation(config, tokenizer, copy_vocab=None):
             fg_str_dict[fg_index] = s1
 
     if config.do_pretrain_lm_init:
-        model = T5WithCopy.from_pretrained(config.lm_type, return_dict=True, cache_dir='.', local_config=config, copy_vocab=copy_vocab, attachable_index=attachable_index, fg_str_dict=fg_str_dict)
+        model = T5WithMF.from_pretrained(config.lm_type, return_dict=True, cache_dir='.', local_config=config, copy_vocab=copy_vocab, attachable_index=attachable_index, fg_str_dict=fg_str_dict)
     else:
         lm_config = T5Config.from_pretrained(config.lm_type, return_dict=True, cache_dir='.')
         lm_config.num_layers = 3
-        model = T5WithCopy(lm_config, local_config=config, copy_vocab=copy_vocab, attachable_index=attachable_index, fg_str_dict=fg_str_dict)
-
-
-    if config.use_pointer:
-        fg_embeds = create_embeds(model, copy_vocab.token_fg_w)
-        new_embeds = torch.cat([model.get_input_embeddings().weight, fg_embeds], dim=0)
-        new_input_embedding = nn.Embedding.from_pretrained(new_embeds, freeze=config.freeze_param)
-        model.set_input_embeddings(new_input_embedding)
-
-        _word2fgclass = np.zeros(copy_vocab.get_fg_size())
-        for fg_i, cls_i in copy_vocab.i_to_cls.items():
-            _word2fgclass[fg_i] = cls_i
-        _word2fgclass = torch.from_numpy(_word2fgclass).long()
-        model.set_fg2cls(_word2fgclass)
-
-        oc_component = OC(
-            (fg_embeds, None),
-            copy_vocab,
-            model.model_dim,
-            model.model_dim,
-            config.use_mention_flag,
-            config.mention_flag_state
-        )
-        model.set_oc(oc_component)
+        model = T5WithMF(lm_config, local_config=config, copy_vocab=copy_vocab, attachable_index=attachable_index, fg_str_dict=fg_str_dict)
 
     if config.freeze_param and config.do_pretrain_lm_init:
         for p in model.shared.parameters():
