@@ -34,13 +34,3 @@ def distinct_n_sentence_level(sentence, n):
 
 def distinct_n(sentences, n):
     return sum(distinct_n_sentence_level(sentence, n) for sentence in sentences) / len(sentences)
-
-with open('e2e_mf.json') as out:
-    out = json.loads(out.read())
-    sens = [v['caption'].split() for v in out]
-    print(distinct_n(sens, 2))
-
-with open('e2e_baseline.json') as out:
-    out = json.loads(out.read())
-    sens = [v['caption'].split() for v in out]
-    print(distinct_n(sens, 2))
